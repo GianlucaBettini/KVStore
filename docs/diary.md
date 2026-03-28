@@ -47,4 +47,5 @@ Define the core data structure and memory layout for the Key-Value Store.
 
     1. Cache locality. The data sits in one contiguous array in memory, which is good for CPU. 
     2. No memory overhead for pointers. 
-
+* **Decision:** Hash function: djb2 by Dan Bernstein
+* **Why:** It's just a few lines of standard code; it requires zero external libraries; it's a simple algorithm and its hash space isn't perfectly uniform, which allows to easily test if the collision resolution code actually works.

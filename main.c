@@ -8,7 +8,7 @@ int main(void) {
   ht_set(ht, "user:2", "luigi");
   ht_set(ht, "user:1", "wario"); // Overwrites mario
 
-  printf("user:1 is %s\n", ht_get(ht, "user:1")); // Must print mario
+  printf("user:1 is %s\n", ht_get(ht, "user:1")); // Must print wario
   printf("user:2 is %s\n", ht_get(ht, "user:2")); // Must print luigi
 
   ht_del(ht, "user:1");
