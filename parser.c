@@ -1,15 +1,26 @@
 #include "parser.h"
 #include "hash_table.h"
+#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 
+void tolower_string(char *str) {
+  if (str == NULL)
+    return;
+
+  for (int i = 0; str[i] != 0; i++) {
+    str[i] = (char)tolower((unsigned char)str[i]);
+  }
+}
+
 /* Assign the right command enum to the token. */
 cmd_type_t parse_cmd(char *token) {
-  if (strcmp(token, "GET") == 0)
+  tolower_string(token);
+  if (strcmp(token, "get") == 0)
     return CMD_GET;
-  else if (strcmp(token, "SET") == 0)
+  else if (strcmp(token, "set") == 0)
     return CMD_SET;
-  else if (strcmp(token, "DEL") == 0)
+  else if (strcmp(token, "del") == 0)
     return CMD_DEL;
   else
     return CMD_INVALID;
