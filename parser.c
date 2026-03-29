@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
+/* Convert @str to lowercase. */
 void tolower_string(char *str) {
   if (str == NULL)
     return;
@@ -15,7 +16,9 @@ void tolower_string(char *str) {
 
 /* Assign the right command enum to the token. */
 cmd_type_t parse_cmd(char *token) {
+  // Convert to lowercase to make command parsing case-insensitive
   tolower_string(token);
+
   if (strcmp(token, "get") == 0)
     return CMD_GET;
   else if (strcmp(token, "set") == 0)
@@ -30,8 +33,6 @@ bool parse_input(char *str, parsed_input_t *parsed) {
   cmd_type_t cmd_type;
   char *state_ptr; // used in strtok_r to save the state in the string
 
-  // parse the first token, which is the command. If invalid, return false (on
-  // error).
   char *token = strtok_r(str, " \r\n", &state_ptr);
   if (token == NULL)
     return false;
@@ -40,16 +41,15 @@ bool parse_input(char *str, parsed_input_t *parsed) {
     return false;
   parsed->type = cmd_type;
 
-  // parse the second token, so the key. If NULL, return false (on error).
   token = strtok_r(NULL, " \r\n", &state_ptr);
   if (token == NULL)
     return false;
   parsed->key = token;
 
-  // switch on the eventual third token.
+  // TODO: Currently I ignore the extra arguments (tokens) (e.g. GET key extra1)
+  // In the future it must validate the exact number of args for each command.
   switch (parsed->type) {
   case CMD_SET:
-    // parse the third token, which is the val.
     token = strtok_r(NULL, " \r\n", &state_ptr);
     if (token == NULL) {
       return false;

@@ -9,15 +9,15 @@ typedef struct hash_table hash_table_t;
 
 /* ============= Prototypes ============= */
 
-/* 1. Lifecycles */
+/* === Lifecycles */
 
-/* Creates the hash table. */
+/* Create the hash table. */
 hash_table_t *ht_create(size_t num_buckets);
 
-/* Frees the hash table. */
+/* Free the hash table. */
 void ht_destroy(hash_table_t *ht);
 
-/* 2. Core operations */
+/* === Core operations */
 
 /* Insert a new entry (key, val) if the key is not already present in the table.
  * Replace the val if the key is already present.
@@ -25,13 +25,13 @@ void ht_destroy(hash_table_t *ht);
  */
 bool ht_set(hash_table_t *ht, const char *key, const char *val);
 
-/* Delete the entry identified by the key. Return true if found and deleted. */
+/* Delete the entry identified by the key. Return true on success. */
 bool ht_del(hash_table_t *ht, const char *key);
 
 /* Returns a pointer to the value string or NULL if not found. */
 char *ht_get(hash_table_t *ht, const char *key);
 
-/* 3. Utility functions */
+/* === Utility functions */
 
-/* The hash function to turn a key into an integer. */
+/* Hash function to turn a key into an integer. */
 size_t hash_function(const char *key, size_t num_bucket);

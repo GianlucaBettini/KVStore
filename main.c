@@ -8,7 +8,6 @@
 int main(void) {
   hash_table_t *ht = ht_create(10);
 
-  // create the parsed_input struct and initialize it.
   parsed_input_t parsed;
   parsed.key = NULL;
   parsed.val = NULL;

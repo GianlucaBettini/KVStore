@@ -35,8 +35,8 @@ hash_table_t *ht_create(size_t num_buckets) {
 }
 
 void free_node(kv_node_t *node) {
-  free(node->key);   // because of strdup()
-  free(node->value); // same here
+  free(node->key); // because of strdup()
+  free(node->value);
   free(node);
 }
 
@@ -121,7 +121,7 @@ kv_node_t *create_kv_node(char *key, char *val) {
 }
 
 /* It still doesn't manage errors.
- * The check of the strdup allocation is not yet implemented. */
+ * TODO: The check of the strdup allocation is not yet implemented. */
 bool ht_set(hash_table_t *ht, const char *key, const char *val) {
   size_t idx = hash_function(key, ht->num_buckets);
   kv_node_t *head = ht->buckets[idx];
@@ -156,7 +156,7 @@ size_t hash_function(const char *str, size_t num_bucket) {
   int c;
 
   while ((c = *str++)) {
-    hash = ((hash << 5) + hash) + c; /* equivalent to: hash * 33 + c */
+    hash = ((hash << 5) + hash) + c; // equivalent to: hash * 33 + c
   }
 
   return hash % num_bucket;

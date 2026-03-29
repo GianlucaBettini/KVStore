@@ -15,8 +15,10 @@ typedef struct parsed_input {
 
 /* ============ Functions ============ */
 
-/* It takes a string and tokenizes it, populating the parsed_input_t struct.
- * Return true on success. */
+/* Parses a raw command string, populating the parsed_input_t struct.
+ * WARNING: This function uses zero-copy parsing, so it mutates the input @str
+ * by replacing delimiters with '\0'. The caller must ensure @str is mutable and
+ * must not free @parsed-key and @parsed->val. Return true on success. */
 bool parse_input(char *str, parsed_input_t *parsed);
 
 /* It takes the parsed_input_t struct and executes the command.

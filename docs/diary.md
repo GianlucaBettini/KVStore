@@ -49,3 +49,18 @@ Define the core data structure and memory layout for the Key-Value Store.
     2. No memory overhead for pointers. 
 * **Decision:** Hash function: djb2 by Dan Bernstein
 * **Why:** It's just a few lines of standard code; it requires zero external libraries; it's a simple algorithm and its hash space isn't perfectly uniform, which allows to easily test if the collision resolution code actually works.
+
+## [29-03-2026] - Protocol Parser Layer implementation
+
+### 🎯 Goal
+Build a local REPL with stdin and the parsing pipeline. 
+
+### ⚖️ Architectural Decisions
+* **Decision:** Zero-copy parsing
+* **Why:** To avoid allocating new memory. Instead it mutates the input buffer by replacing delimitations with the null terminator '\0' and passes pointers to those substrings. This keeps CPU cache locality high and latency low. 
+* **How:** Used strtok_r (thread-safe) function to mutate the string in place. 
+* **Decision:** Separation of tokenization and execution of the command (dispatcher).
+* **Why:** To keep concerns separated. 
+* **Workflow:** The parser translates the input string into a struct with the command type (enum), the key and eventually the val. 
+The enum allows to use a fast switch-case instead of using strcmp (which is slower). 
+To keep it simple I decided not to worry about the extra args (e.g. `GET key extra1 extra2`), but in the future it must be corrected. 
