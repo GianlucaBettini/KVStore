@@ -58,3 +58,16 @@ asan: clean $(EXEC) # Cleans old files, then builds
 # The 'clean' target deletes all generated files.
 clean:
 	rm -f $(OBJ) $(EXEC) $(EXEC)_asan
+
+# --- Testing ---
+
+TEST_EXEC = run_tests
+
+TEST_SRC = tests/test_hash_table.c hash_table.c 
+
+test:
+		$(CC) $(CFLAGS) $(TEST_SRC) -o $(TEST_EXEC) 
+		./$(TEST_EXEC)
+
+clean_tests:
+		rm -f $(TEST_EXEC)

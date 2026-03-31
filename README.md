@@ -23,3 +23,16 @@ make clean
 make all
 ./kvstore
 ```
+
+## Run unit tests
+```bash
+make clean_tests
+make test 
+```
+
+## Run integration tests
+```bash
+make clean
+make all
+python3 tests/test_e2e.py
+```

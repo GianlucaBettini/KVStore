@@ -64,3 +64,10 @@ Build a local REPL with stdin and the parsing pipeline.
 * **Workflow:** The parser translates the input string into a struct with the command type (enum), the key and eventually the val. 
 The enum allows to use a fast switch-case instead of using strcmp (which is slower). 
 To keep it simple I decided not to worry about the extra args (e.g. `GET key extra1 extra2`), but in the future it must be corrected. 
+
+## [31-03-2026] - Unit and integration testing of hash table ops
+
+### 🎯 Goal
+Implement the unit (assert.h) and integration (python) testing of hash table operations and update conseguently the docs.
+
+
