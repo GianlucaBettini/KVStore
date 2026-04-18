@@ -23,4 +23,4 @@ bool parse_input(char *str, parsed_input_t *parsed);
 
 /* It takes the parsed_input_t struct and executes the command.
  * Return true on success. */
-bool exec_cmd(parsed_input_t *parsed, hash_table_t *ht);
+// bool exec_cmd(parsed_input_t *parsed, hash_table_t *ht);

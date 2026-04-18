@@ -1,7 +1,5 @@
 #include "parser.h"
-#include "hash_table.h"
 #include <ctype.h>
-#include <stdio.h>
 #include <string.h>
 
 /* Convert @str to lowercase. */
@@ -59,36 +57,6 @@ bool parse_input(char *str, parsed_input_t *parsed) {
 
   case CMD_DEL:
   case CMD_GET:
-    break;
-  default:
-    return false;
-  }
-
-  return true;
-}
-
-bool exec_cmd(parsed_input_t *parsed, hash_table_t *ht) {
-  char *val = NULL;
-  switch (parsed->type) {
-  case CMD_SET:
-    if (ht_set(ht, parsed->key, parsed->val))
-      printf("OK\n");
-    else
-      printf("Not OK\n");
-    break;
-  case CMD_GET:
-    val = ht_get(ht, parsed->key);
-    if (val == NULL)
-      printf("Not found\n");
-    else
-      printf("%s\n", val);
-    break;
-  case CMD_DEL:
-    if (ht_del(ht, parsed->key)) {
-      printf("Deleted\n");
-    } else {
-      printf("Not found\n");
-    }
     break;
   default:
     return false;
