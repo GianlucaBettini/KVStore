@@ -1,6 +1,6 @@
 # C-KV: A High-Performance Key-Value Store
 
-A POSIX-compliant, in-memory Key-Value store written entirely in C from scratch. Designed with a strict focus on zero-dependency architecture, manual memory management, and non-blocking network I/O.
+A POSIX-compliant, in-memory Key-Value store written entirely in C from scratch. Designed with a strict focus on zero-dependency architecture, manual memory management, and blocking TCP network I/O (with epoll-based concurrency planned for v1.0).
 
 ## Architecture v0.1 (MVP)
 
@@ -35,4 +35,16 @@ make test
 make clean
 make all
 python3 tests/test_e2e.py
+```
+
+## Interacting with the Server
+Once the server is running, open a new terminal and connect using Netcat:
+```bash
+nc 127.0.0.1 8080
+```
+Then type your command directly:
+```bash
+SET mykey myval
+GET mykey
+DEL mykey
 ```

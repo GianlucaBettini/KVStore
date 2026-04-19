@@ -71,3 +71,21 @@ To keep it simple I decided not to worry about the extra args (e.g. `GET key ext
 Implement the unit (assert.h) and integration (python) testing of hash table operations and update conseguently the docs.
 
 
+## [19-04-2026] - Network Layer implementation
+
+### 🎯 Goal
+Replace the local stdin/stdout REPL with a TCP socket server to make the database accessible over the network.
+
+### ⚖️ Architectural Decisions
+* **Decision:** Custom POSIX Socket Abstraction API
+* **Why:** To enforce Separation of Concerns.
+* **How:** Built network.c and network.h to wrap socket creation, binding, listening, accepting, and data transfer into clean functions (e.g., net_listen, net_recv).
+* **Decision:** Stateful Linear Buffer (Accumulator) for TCP Fragmentation
+* **Why:** TCP is a continuous byte stream, not a datagram protocol. A single recv() call might return half a command or multiple commands glued together (pipelining). Passing incomplete strings directly to the zero-copy parser would break the tokenizer.
+* **How:** Implemented get_command_to_scan. It uses memchr to scan the raw network buffer for the \n delimiter, extracts a clean and complete frame, and uses memmove to shift any leftover bytes to the beginning of the buffer for the next read cycle.
+* **Decision:** Single-threaded, Iterative, Blocking Model
+* **Why:** To validate the core network pipeline and logic (MVP) before introducing the complexity of concurrency (like threads or event loops).
+* **Workflow:** The main.c orchestrates everything: an outer loop accepts a connection, and an inner loop reads bytes, extracts frames, passes them to the parser, executes the command against the Hash Table and pushes the formatted response back via net_send.
+* **Decision:** Stack Allocation for Network Buffers
+* **Why:** To prevent memory leaks and maximize speed.
+* **How:** Instead of allocating sender_buf and server_buf on the heap with malloc/free inside the connection loop, they are statically allocated on the stack combined with snprintf to guarantee buffer overflow protection. Result: 0 memory leaks in Valgrind.
