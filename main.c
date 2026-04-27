@@ -58,7 +58,7 @@ int main(void) {
       while ((rv = get_command_to_scan(server_buf, &curr_buf_len, buf_to_parse,
                                        '\n')) == ANET_OK) {
         if (!parse_input(buf_to_parse, &parsed)) {
-          // invalid syntax
+          net_send(clientfd, "Invalid syntax\n");
           continue;
         }
 
