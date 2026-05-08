@@ -18,5 +18,5 @@ typedef struct parsed_input {
 /* Parses a raw command string, populating the parsed_input_t struct.
  * WARNING: This function uses zero-copy parsing, so it mutates the input @str
  * by replacing delimiters with '\0'. The caller must ensure @str is mutable and
- * must not free @parsed-key and @parsed->val. Return true on success. */
+ * must not free @parsed->key and @parsed->val. Return true on success. */
 bool parse_input(char *str, parsed_input_t *parsed);
