@@ -146,9 +146,6 @@ bool fill_client_read_buf(int fd, int *closed) {
 	}
 
 	return true;
-
-	// TODO: I never return false, so I have to think again about the exceptions
-	// in here
 }
 
 bool drain_client_write_buf(int fd, int epollfd, int *closed, int is_epollout) {
