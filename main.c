@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/epoll.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 #define MAX_BUF_SIZE 32768		// 2^15
@@ -19,6 +20,7 @@
 #define NUM_BUCKETS 10000
 #define MAX_EVENTS 128
 #define MAX_CLIENTS 10024
+#define MAX_VAL_LEN 1023
 
 typedef struct {
 	int fd;
@@ -56,6 +58,146 @@ void init_client(int fd) {
 	clients[fd].write_len = 0;
 }
 
+bool disconnect_client(int fd, int *closed) {
+	clients[fd].read_len = 0;  // not needed, just defensive programming
+	clients[fd].write_len = 0; // same here
+	close(fd);
+	*closed = 1;
+	return false;
+}
+
+bool buf_append(int fd, const char *str, int *closed) {
+	int len = strlen(str) + 1;
+	while (clients[fd].write_len + len > clients[fd].write_size) {
+		if (clients[fd].write_size >= MAX_BUF_SIZE) {
+			return disconnect_client(fd, closed);
+		}
+		clients[fd].write_buf =
+			realloc(clients[fd].write_buf, 2 * clients[fd].write_size);
+		clients[fd].write_size *= 2;
+	}
+
+	strcpy(clients[fd].write_buf + clients[fd].write_len, str);
+	clients[fd].write_len += (len - 1);
+
+	return true;
+}
+
+bool init_server(int *listen_sock, hash_table_t **ht, int *epollfd) {
+	int rv;
+	struct epoll_event ev;
+
+	if ((rv = net_info(NULL, PORT, listen_sock)) == ANET_ERR) {
+		return false;
+	}
+
+	if ((rv = net_listen(*listen_sock, BACKLOG)) == ANET_ERR) {
+		close(*listen_sock);
+		return false;
+	}
+
+	printf("Server listening on port %s\n", PORT);
+
+	*ht = ht_create(NUM_BUCKETS);
+
+	init_all_clients();
+
+	*epollfd = epoll_create1(0);
+	if (*epollfd == -1) {
+		perror("epoll_create1");
+		exit(EXIT_FAILURE);
+	}
+
+	ev.events = EPOLLIN;
+	ev.data.fd = *listen_sock;
+	if (epoll_ctl(*epollfd, EPOLL_CTL_ADD, *listen_sock, &ev) == -1) {
+		perror("epoll_ctl: listen_sock");
+		exit(EXIT_FAILURE);
+	}
+
+	return true;
+}
+
+bool fill_client_read_buf(int fd, int *closed) {
+	ssize_t nbytes;
+	while (1) {
+		if (clients[fd].read_len >= MAX_BUF_SIZE) {
+			return disconnect_client(fd, closed);
+		} else if (clients[fd].read_len == clients[fd].read_size) {
+			clients[fd].read_buf =
+				realloc(clients[fd].read_buf, 2 * clients[fd].read_size);
+			clients[fd].read_size *= 2;
+		}
+
+		nbytes = net_recv(fd, clients[fd].read_buf + clients[fd].read_len,
+						  clients[fd].read_size - clients[fd].read_len);
+
+		if (nbytes == 0) {
+			return disconnect_client(fd, closed);
+		} else if (nbytes == -1) {
+			if (errno == EAGAIN || errno == EWOULDBLOCK) {
+				break;
+			} else {
+				return disconnect_client(fd, closed);
+			}
+		}
+
+		clients[fd].read_len += nbytes;
+	}
+
+	return true;
+
+	// TODO: I never return false, so I have to think again about the exceptions
+	// in here
+}
+
+bool drain_client_write_buf(int fd, int epollfd, int *closed, int is_epollout) {
+	struct epoll_event ev;
+	ssize_t nbytes;
+
+	while (clients[fd].write_len > 0) {
+		nbytes = net_send(fd, clients[fd].write_buf, clients[fd].write_len);
+
+		if (nbytes == -1) {
+			if (errno == EAGAIN || errno == EWOULDBLOCK) {
+				if (!is_epollout) {
+					ev.events = EPOLLIN | EPOLLOUT | EPOLLET;
+					ev.data.fd = fd;
+					epoll_ctl(epollfd, EPOLL_CTL_MOD, fd, &ev);
+				}
+				break;
+			} else {
+				return disconnect_client(fd, closed);
+			}
+		}
+
+		if (nbytes == 0) {
+			return disconnect_client(fd, closed);
+		}
+
+		// nbytes > 0
+
+		if ((size_t)nbytes == clients[fd].write_len) {
+			clients[fd].write_len = 0;
+		} else if ((size_t)nbytes < clients[fd].write_len) {
+			memmove(clients[fd].write_buf, clients[fd].write_buf + nbytes,
+					clients[fd].write_len - nbytes);
+			clients[fd].write_len -= nbytes;
+		} else {
+			// not reachable, just defensive programming
+			return disconnect_client(fd, closed);
+		}
+	}
+
+	if (clients[fd].write_len == 0 && is_epollout) {
+		ev.events = EPOLLIN | EPOLLET;
+		ev.data.fd = fd;
+		epoll_ctl(epollfd, EPOLL_CTL_MOD, fd, &ev);
+	}
+
+	return true;
+}
+
 int main(void) {
 	hash_table_t *ht;
 	int rv;
@@ -63,35 +205,11 @@ int main(void) {
 	struct sockaddr_storage client_addr;
 	int epollfd, nfds;
 	struct epoll_event ev, events[MAX_EVENTS];
-	ssize_t nbytes;
 	char buf_to_parse[MAX_BUF_SIZE];
 	parsed_input_t parsed;
 
-	if ((rv = net_info(NULL, PORT, &listen_sock)) == ANET_ERR) {
+	if (!init_server(&listen_sock, &ht, &epollfd)) {
 		return 1;
-	}
-
-	if ((rv = net_listen(listen_sock, BACKLOG)) == ANET_ERR) {
-		close(listen_sock);
-		return 1;
-	}
-
-	printf("Server listening on port %s\n", PORT);
-
-	ht = ht_create(NUM_BUCKETS);
-	init_all_clients();
-
-	epollfd = epoll_create1(0);
-	if (epollfd == -1) {
-		perror("epoll_create1");
-		exit(EXIT_FAILURE);
-	}
-
-	ev.events = EPOLLIN;
-	ev.data.fd = listen_sock;
-	if (epoll_ctl(epollfd, EPOLL_CTL_ADD, listen_sock, &ev) == -1) {
-		perror("epoll_ctl: listen_sock");
-		exit(EXIT_FAILURE);
 	}
 
 	while (1) {
@@ -136,46 +254,7 @@ int main(void) {
 
 			} else if (events[i].events & EPOLLIN) {
 				// EPOLLIN routine S4
-				while (1) {
-					if (clients[evfd].read_len >= MAX_BUF_SIZE) {
-						// TODO error: reached max buffer size
-						close(evfd);
-						closed = 1;
-						break;
-					} else if (clients[evfd].read_len ==
-							   clients[evfd].read_size) {
-						clients[evfd].read_buf =
-							realloc(clients[evfd].read_buf,
-									2 * clients[evfd].read_size);
-						clients[evfd].read_size *= 2;
-					}
-
-					nbytes = net_recv(
-						evfd, clients[evfd].read_buf + clients[evfd].read_len,
-						clients[evfd].read_size - clients[evfd].read_len);
-
-					if (nbytes == 0) {
-						// client disconnected
-						// TODO i have to manage the disconnection of the client
-						// (the close(clientfd))
-						close(evfd);
-						closed = 1;
-						break;
-					} else if (nbytes == -1) {
-						if (errno == EAGAIN || errno == EWOULDBLOCK) {
-							break;
-						} else {
-							// error
-							close(evfd);
-							closed = 1;
-							break;
-						}
-					}
-
-					clients[evfd].read_len += nbytes;
-				}
-
-				if (closed == 1)
+				if (!fill_client_read_buf(evfd, &closed))
 					continue;
 
 				while ((rv = get_command_to_scan(
@@ -183,26 +262,8 @@ int main(void) {
 							buf_to_parse, '\n')) == ANET_OK) {
 					int valid = 1;
 					if (!parse_input(buf_to_parse, &parsed)) {
-						while (clients[evfd].write_len + 15 + 1 >
-							   clients[evfd].write_size) {
-							if (clients[evfd].write_size >= MAX_BUF_SIZE) {
-								// error
-								close(evfd);
-								closed = 1;
-								break;
-							}
-							clients[evfd].write_buf =
-								realloc(clients[evfd].write_buf,
-										2 * clients[evfd].write_size);
-							clients[evfd].write_size *= 2;
-						}
-						if (!closed) {
-							strcpy(clients[evfd].write_buf +
-									   clients[evfd].write_len,
-								   "Invalid syntax\n");
-							clients[evfd].write_len += 15;
-							valid = 0;
-						}
+						buf_append(evfd, "Invalid syntax\n", &closed);
+						valid = 0;
 					}
 
 					if (closed)
@@ -219,80 +280,13 @@ int main(void) {
 				if (closed)
 					continue;
 
-				nbytes = net_send(evfd, clients[evfd].write_buf,
-								  clients[evfd].write_len);
-
-				if (nbytes == -1) {
-					if (errno == EAGAIN || errno == EWOULDBLOCK) {
-						ev.events = EPOLLIN | EPOLLOUT | EPOLLET;
-						ev.data.fd = evfd;
-						epoll_ctl(epollfd, EPOLL_CTL_MOD, evfd, &ev);
-					} else {
-						// TODO error
-						close(evfd);
-						closed = 1;
-						break;
-					}
-
-				} else if (nbytes >= 0) {
-					if ((size_t)nbytes == clients[evfd].write_len) {
-						clients[evfd].write_len = 0;
-						ev.events = EPOLLIN | EPOLLET;
-						ev.data.fd = evfd;
-						epoll_ctl(epollfd, EPOLL_CTL_MOD, evfd, &ev);
-					} else if ((size_t)nbytes < clients[evfd].write_len) {
-						memmove(clients[evfd].write_buf,
-								clients[evfd].write_buf + nbytes,
-								clients[evfd].write_len - nbytes);
-						clients[evfd].write_len -= nbytes;
-						ev.events = EPOLLIN | EPOLLOUT | EPOLLET;
-						ev.data.fd = evfd;
-						epoll_ctl(epollfd, EPOLL_CTL_MOD, evfd, &ev);
-					} else {
-						// TODO error
-						close(evfd);
-						closed = 1;
-						break;
-					}
-				}
+				if (!drain_client_write_buf(evfd, epollfd, &closed, false))
+					continue;
 
 			} else if (events[i].events & EPOLLOUT) {
 				// EPOLLOUT routine S5
-				while (1) {
-					nbytes = net_send(evfd, clients[evfd].write_buf,
-									  clients[evfd].write_len);
-
-					if (nbytes == -1) {
-						if (errno == EAGAIN || errno == EWOULDBLOCK) {
-							break; // already with EPOLLOUT
-						} else {
-							// TODO error
-							close(evfd);
-							closed = 1;
-							break;
-						}
-
-					} else if (nbytes >= 0) {
-						if ((size_t)nbytes == clients[evfd].write_len) {
-							clients[evfd].write_len = 0;
-							ev.events = EPOLLIN | EPOLLET;
-							ev.data.fd = evfd;
-							epoll_ctl(epollfd, EPOLL_CTL_MOD, evfd, &ev);
-							break;
-						} else if ((size_t)nbytes < clients[evfd].write_len) {
-							memmove(clients[evfd].write_buf,
-									clients[evfd].write_buf + nbytes,
-									clients[evfd].write_len - nbytes);
-							clients[evfd].write_len -= nbytes;
-
-						} else {
-							// TODO error
-							close(evfd);
-							closed = 1;
-							break;
-						}
-					}
-				}
+				if (!drain_client_write_buf(evfd, epollfd, &closed, true))
+					continue;
 			}
 		}
 	}
@@ -308,104 +302,34 @@ bool exec_cmd(parsed_input_t *parsed, hash_table_t *ht, int fd, int *closed) {
 	switch (parsed->type) {
 	case CMD_SET:
 		if (ht_set(ht, parsed->key, parsed->val)) {
-			while (clients[fd].write_len + 3 + 1 > clients[fd].write_size) {
-				if (clients[fd].write_size >= MAX_BUF_SIZE) {
-					// error
-					close(fd);
-					*closed = 1;
-					return false;
-				}
-				clients[fd].write_buf =
-					realloc(clients[fd].write_buf, 2 * clients[fd].write_size);
-				clients[fd].write_size *= 2;
-			}
-			strcpy(clients[fd].write_buf + clients[fd].write_len, "OK\n");
-			clients[fd].write_len += 3;
+			if (!buf_append(fd, "OK\n", closed))
+				return false;
 		} else {
-			while (clients[fd].write_len + 7 + 1 > clients[fd].write_size) {
-				if (clients[fd].write_size >= MAX_BUF_SIZE) {
-					// error
-					close(fd);
-					*closed = 1;
-					return false;
-				}
-				clients[fd].write_buf =
-					realloc(clients[fd].write_buf, 2 * clients[fd].write_size);
-				clients[fd].write_size *= 2;
-			}
-			strcpy(clients[fd].write_buf + clients[fd].write_len, "Not OK\n");
-			clients[fd].write_len += 7;
+			if (!buf_append(fd, "Not OK\n", closed))
+				return false;
 		}
 		break;
 
 	case CMD_GET:
 		val = ht_get(ht, parsed->key);
 		if (val == NULL) {
-			while (clients[fd].write_len + 10 + 1 > clients[fd].write_size) {
-				if (clients[fd].write_size >= MAX_BUF_SIZE) {
-					// error
-					close(fd);
-					*closed = 1;
-					return false;
-				}
-				clients[fd].write_buf =
-					realloc(clients[fd].write_buf, 2 * clients[fd].write_size);
-				clients[fd].write_size *= 2;
-			}
-			strcpy(clients[fd].write_buf + clients[fd].write_len,
-				   "Not found\n");
-			clients[fd].write_len += 10;
+			if (!buf_append(fd, "Not found\n", closed))
+				return false;
 		} else {
-			size_t val_len = strlen(val);
-			while (clients[fd].write_len + val_len + 2 >
-				   clients[fd].write_size) {
-				if (clients[fd].write_size >= MAX_BUF_SIZE) {
-					// error
-					close(fd);
-					*closed = 1;
-					return false;
-				}
-				clients[fd].write_buf =
-					realloc(clients[fd].write_buf, 2 * clients[fd].write_size);
-				clients[fd].write_size *= 2;
-			}
-			snprintf(clients[fd].write_buf + clients[fd].write_len,
-					 clients[fd].write_size - clients[fd].write_len, "%s\n",
-					 val);
-			clients[fd].write_len += val_len + 1;
+			char temp_buf[MAX_VAL_LEN + 2];
+			snprintf(temp_buf, sizeof(temp_buf), "%s\n", val);
+			if (!buf_append(fd, temp_buf, closed))
+				return false;
 		}
 		break;
 
 	case CMD_DEL:
 		if (ht_del(ht, parsed->key)) {
-			while (clients[fd].write_len + 8 + 1 > clients[fd].write_size) {
-				if (clients[fd].write_size >= MAX_BUF_SIZE) {
-					// error
-					close(fd);
-					*closed = 1;
-					return false;
-				}
-				clients[fd].write_buf =
-					realloc(clients[fd].write_buf, 2 * clients[fd].write_size);
-				clients[fd].write_size *= 2;
-			}
-			strcpy(clients[fd].write_buf + clients[fd].write_len, "Deleted\n");
-			clients[fd].write_len += 8;
+			if (!buf_append(fd, "Deleted\n", closed))
+				return false;
 		} else {
-			while (clients[fd].write_len + 10 + 1 > clients[fd].write_size) {
-				if (clients[fd].write_size >= MAX_BUF_SIZE) {
-					// error
-					close(fd);
-					*closed = 1;
-					return false;
-				}
-				clients[fd].write_buf =
-					realloc(clients[fd].write_buf, 2 * clients[fd].write_size);
-				clients[fd].write_size *= 2;
-			}
-			strcpy(clients[fd].write_buf + clients[fd].write_len,
-				   "Not found\n");
-			clients[fd].write_len += 10;
+			if (!buf_append(fd, "Not found\n", closed))
+				return false;
 		}
 		break;
 
