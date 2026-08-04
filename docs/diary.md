@@ -329,7 +329,7 @@ while dynamic rehashing is not implemented yet, I decided to raise, in a brutefo
 to let the kernel open thousands of file simultaneously (during the test) you have to use `ulimit -n 65535`
 
 ## Future proofing
-### Clean the code
+### Clean the code (refactoring)
 * helper functions 
 * graceful shutdown: catch Ctrl+C to clean the RAM and graceful shutdown the server
 
@@ -375,3 +375,27 @@ due to the fact that the architecture is single-threaded, the server uses just o
 * solution:
 to create N processes (or threads) that are "workers", each one of them having its own independent event-loop epoll. 
 To avoid race conditions and RAM corruction, it will be needed to implement some Mutex or to perform "sharding" of the hash table (i.e. split the db in N independent "banks")
+
+## [4-06-2026] - Clean the code (refactoring)
+### Refactoring of main.c
+Added some helper functions. 
+### File Descriptor security fix
+I noticed that when I called "net_accept()" I did not perform any validation on the returned file descriptor. 
+Considering that the system can have at maximum MAX_CLIENTS clients, and that the index of the client in the `clients` array represents the fd number, I had to prevent the access to an index out of bound of the array. 
+Therefore I placed a security check so that, if the fd >= MAX_CLIENTS -> disconnect_client() (maximum number of clients reached). 
+
+Important thing to consider about the fd arrays: 
+the index in the `clients` array represents a fd. The array goes from 0 to MAX_CLIENTS - 1. 
+Therefore, we can have at maximum MAX_CLIENTS - 5 clients connected to the system. That is due to the fact that some fd are already set by default:
+fd = 0, 1, 2 respectively stdin, stdout, stderr. 
+fd = 3, 4 respectively listen_sock, epollfd (these are set by me at the beginning of the program). 
+
+### Graceful shutdown
+When the server is closed in a bruteforce way (e.g. Ctrl+C), I want to free everything and disconnect all the clients (closing the sockets) before shutting down the server. 
+I implemented this through sigaction(), by intercepting SIGINT and SIGTERM and by using a volatile sig_atomic_t server_running var (volatile -> not to be placed in a CPU cache, because the kernel could suddenly modify it; atomic -> writing and reading this var in just one clock cycle).
+When one of these 2 signals is catched, errno is set to EINTR and epoll_wait is waken up with -1. 
+So, in this way, the server can finish to serve all the clients already waken up (in-flight requests), ending by freeing the allocated memory locations and closing all the opened sockets. 
+Valgrind validates this strategy with 0 bytes in 0 blocks in use at exit, no leaks are possible (ERROR SUMMARY: 0 errors from 0 contexts (suppressed: 0 from 0)).
+
+
+
