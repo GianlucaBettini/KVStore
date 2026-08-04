@@ -25,7 +25,7 @@
 		  // are stdin,stdout,stderr, fd 3,4 are listensock, epollfd
 #define MAX_VAL_LEN 1023
 
-int server_running = 1;
+volatile sig_atomic_t server_running = 1;
 
 typedef struct {
 	int fd;
@@ -39,6 +39,8 @@ client_state_t clients[MAX_CLIENTS];
 
 bool exec_cmd(parsed_input_t *, hash_table_t *, int, int *);
 
+/* Signal handler function: called when SIGINT or SIGTERM are catched (by the
+ * kernel). */
 void sig_handler(int sig) {
 	(void)sig; // don't need it
 	server_running = 0;
@@ -87,6 +89,9 @@ void free_all_clients() {
 	}
 }
 
+/* Disconnect a client means to reset to 0 the length of the write and read
+ * buffers related to the fd of the disconnecting client and closed is set to 1.
+ * The write and read buffers are not freed. */
 bool disconnect_client(int fd, int *closed) {
 	clients[fd].read_len = 0;  // not needed, just defensive programming
 	clients[fd].write_len = 0; // same here
@@ -96,8 +101,13 @@ bool disconnect_client(int fd, int *closed) {
 	return false;
 }
 
+/* Append @str to the write buf of the client fd.
+ * If there is not enough space, realloc the buffer doubling its size.
+ * If the maximum buffer size is reached and surpassed, the client is
+ * disconnected.
+ * Return true on success, false on disconnection. */
 bool buf_append(int fd, const char *str, int *closed) {
-	int len = strlen(str) + 1;
+	int len = strlen(str) + 1; // counting the \0 byte appended by strcpy()
 	while (clients[fd].write_len + len > clients[fd].write_size) {
 		if (clients[fd].write_size >= MAX_BUF_SIZE) {
 			return disconnect_client(fd, closed);
@@ -108,11 +118,17 @@ bool buf_append(int fd, const char *str, int *closed) {
 	}
 
 	strcpy(clients[fd].write_buf + clients[fd].write_len, str);
-	clients[fd].write_len += (len - 1);
+	clients[fd].write_len +=
+		(len - 1); // not counting the \0 byte appended by strcpy()
 
 	return true;
 }
 
+/* Initialize the server:
+ * network
+ * hash table
+ * clients states
+ * epoll architecture */
 bool init_server(int *listen_sock, hash_table_t **ht, int *epollfd) {
 	int rv;
 	struct epoll_event ev;
@@ -148,6 +164,11 @@ bool init_server(int *listen_sock, hash_table_t **ht, int *epollfd) {
 	return true;
 }
 
+/* Fill the client's read buffer, placing into it the received bytes, until one
+ * of the following: everything is placed correctly into the read buffer
+ * (EAGAIN, kernel buf is empty) client disconnected maximum buffer size
+ * exceeded. If needed, resize the read buffer. Return true on success, false on
+ * disconnection. */
 bool fill_client_read_buf(int fd, int *closed) {
 	ssize_t nbytes;
 	while (1) {
@@ -178,6 +199,15 @@ bool fill_client_read_buf(int fd, int *closed) {
 	return true;
 }
 
+/* Drain the client's write buffer sending the bytes in it until one of the
+ * following: everything is sent partial sent (kernel buf of the client full).
+ * If needed, shift the remaining bytes to sent at the beginning of the client's
+ * write buf.
+ * If in EPOLLIN branch and partial sent, set EPOLLOUT flag in the
+ * entry related to the client of the interest list.
+ * If every byte is sent and EPOLLOUT branch, turn off the EPOLLOUT flag.
+ * Return true on success, false on disconnection.
+ * */
 bool drain_client_write_buf(int fd, int epollfd, int *closed, int is_epollout) {
 	struct epoll_event ev;
 	ssize_t nbytes;
