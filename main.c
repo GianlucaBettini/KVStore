@@ -5,6 +5,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,8 +25,11 @@
 		  // are stdin,stdout,stderr, fd 3,4 are listensock, epollfd
 #define MAX_VAL_LEN 1023
 
+int server_running = 1;
+
 typedef struct {
 	int fd;
+	bool is_active;
 	char *read_buf, *write_buf;
 	size_t read_len, write_len;
 	size_t read_size, write_size;
@@ -35,9 +39,15 @@ client_state_t clients[MAX_CLIENTS];
 
 bool exec_cmd(parsed_input_t *, hash_table_t *, int, int *);
 
+void sig_handler(int sig) {
+	(void)sig; // don't need it
+	server_running = 0;
+}
+
 void init_all_clients() {
 	for (int i = 0; i < MAX_CLIENTS; i++) {
 		clients[i].fd = i;
+		clients[i].is_active = false;
 		clients[i].read_buf = NULL;
 		clients[i].write_buf = NULL;
 		clients[i].read_len = 0;
@@ -48,6 +58,7 @@ void init_all_clients() {
 }
 
 void init_client(int fd) {
+	clients[fd].is_active = true;
 	if (clients[fd].read_buf == NULL) {
 		clients[fd].read_buf = malloc(INIT_READ_BUF_SIZE);
 		clients[fd].read_size = INIT_READ_BUF_SIZE;
@@ -60,9 +71,26 @@ void init_client(int fd) {
 	clients[fd].write_len = 0;
 }
 
+void free_all_clients() {
+	for (int fd = 0; fd < MAX_CLIENTS; fd++) {
+		if (clients[fd].write_buf != NULL) {
+			free(clients[fd].write_buf);
+		}
+
+		if (clients[fd].read_buf != NULL) {
+			free(clients[fd].read_buf);
+		}
+
+		if (clients[fd].is_active) {
+			close(fd);
+		}
+	}
+}
+
 bool disconnect_client(int fd, int *closed) {
 	clients[fd].read_len = 0;  // not needed, just defensive programming
 	clients[fd].write_len = 0; // same here
+	clients[fd].is_active = false;
 	close(fd);
 	*closed = 1;
 	return false;
@@ -206,16 +234,27 @@ int main(void) {
 	struct epoll_event ev, events[MAX_EVENTS];
 	char buf_to_parse[MAX_BUF_SIZE];
 	parsed_input_t parsed;
+	struct sigaction act = {0};
+
+	sigemptyset(&act.sa_mask);
+
+	act.sa_handler = sig_handler;
+	sigaction(SIGINT, &act, NULL);
+	sigaction(SIGTERM, &act, NULL);
 
 	if (!init_server(&listen_sock, &ht, &epollfd)) {
 		return 1;
 	}
 
-	while (1) {
+	while (server_running) {
 		nfds = epoll_wait(epollfd, events, MAX_EVENTS, -1);
 		if (nfds == -1) {
-			perror("epoll_wait");
-			exit(EXIT_FAILURE);
+			if (errno == EINTR) {
+				continue;
+			} else {
+				perror("epoll_wait");
+				exit(EXIT_FAILURE);
+			}
 		}
 
 		for (int i = 0; i < nfds; i++) {
@@ -297,6 +336,8 @@ int main(void) {
 			}
 		}
 	}
+
+	free_all_clients();
 	close(listen_sock);
 	ht_destroy(ht);
 
