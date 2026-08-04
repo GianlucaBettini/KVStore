@@ -19,7 +19,9 @@
 #define BACKLOG 10
 #define NUM_BUCKETS 10000
 #define MAX_EVENTS 128
-#define MAX_CLIENTS 10024
+#define MAX_CLIENTS                                                            \
+	10024 // the real max number of clients is MAX_CLIENTS - 5 because fd 0,1,2
+		  // are stdin,stdout,stderr, fd 3,4 are listensock, epollfd
 #define MAX_VAL_LEN 1023
 
 typedef struct {
@@ -233,6 +235,14 @@ int main(void) {
 							perror("accept");
 							exit(EXIT_FAILURE);
 						}
+					}
+
+					if (conn_sock >= MAX_CLIENTS) {
+						printf("Warning: MAX_CLIENTS (%d - 5) reached. "
+							   "Rejecting connection...",
+							   MAX_CLIENTS);
+						close(conn_sock);
+						continue;
 					}
 					// S2
 					fcntl(conn_sock, F_SETFL, O_NONBLOCK);
