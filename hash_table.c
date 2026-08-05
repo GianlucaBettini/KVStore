@@ -160,11 +160,7 @@ kv_node_t *create_kv_node(char *key, char *val) {
 	return new_node;
 }
 
-/* If the key is not already present, it allocates a new node and inserts it
- * into the ht. Otherwise, the value related to the key is updated. Before
- * creating a new node, the load factor has to be checked and the hash table
- * resized, if needed.
- * TODO: The check of the strdup allocation is not yet implemented. */
+/* TODO: The check of the strdup allocation is not yet implemented. */
 bool ht_set(hash_table_t *ht, const char *key, const char *val) {
 	size_t idx = hash_function(key, ht->num_buckets);
 	kv_node_t *head = ht->buckets[idx];

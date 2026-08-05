@@ -19,8 +19,11 @@ void ht_destroy(hash_table_t *ht);
 
 /* === Core operations */
 
-/* Insert a new entry (key, val) if the key is not already present in the table.
- * Replace the val if the key is already present.
+/* If the key is not already present, allocate a new node and insert it
+ * into the ht.
+ * Otherwise, update the value related to the key.
+ * Before creating a new node, the load factor has to be checked and the hash
+ * table resized, if needed.
  * Return true on success.
  */
 bool ht_set(hash_table_t *ht, const char *key, const char *val);
