@@ -376,7 +376,7 @@ due to the fact that the architecture is single-threaded, the server uses just o
 to create N processes (or threads) that are "workers", each one of them having its own independent event-loop epoll. 
 To avoid race conditions and RAM corruction, it will be needed to implement some Mutex or to perform "sharding" of the hash table (i.e. split the db in N independent "banks")
 
-## [4-06-2026] - Clean the code (refactoring)
+## [4-08-2026] - Clean the code (refactoring)
 ### Refactoring of main.c
 Added some helper functions. 
 ### File Descriptor security fix
@@ -397,5 +397,12 @@ When one of these 2 signals is catched, errno is set to EINTR and epoll_wait is 
 So, in this way, the server can finish to serve all the clients already waken up (in-flight requests), ending by freeing the allocated memory locations and closing all the opened sockets. 
 Valgrind validates this strategy with 0 bytes in 0 blocks in use at exit, no leaks are possible (ERROR SUMMARY: 0 errors from 0 contexts (suppressed: 0 from 0)).
 
+## [5-08-2026] - Dynamic rehashing
+Implemented, in hash_table.c, the function ht_resize() to double up the number of buckets of the ht when load factor > 0.75.
+This function just allocates a new array of buckets (and frees the old one) whose size is double w.r.t the old one, and rehashes every key of the old ht inserting every one of them into the new ht. 
+The function does not free any node, it just modifies pointers. 
+After adding a new element into the ht, the load factor is checked and, if large enough, the ht is resized. 
+Load factor $\alpha$ = #entries / #buckets. 
+If $\alpha > 0.75$ the resize function is performed. 
 
 
