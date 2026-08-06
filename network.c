@@ -95,6 +95,7 @@ ssize_t net_send(int clientfd, char *buf, size_t len) {
 	return nbytes;
 }
 
+/* TODO: move it elsewhere */
 int get_command_to_scan(char *server_buf, size_t *curr_buf_len,
 						char *buf_to_parse, char target) {
 	size_t command_len;

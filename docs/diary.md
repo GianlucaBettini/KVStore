@@ -341,6 +341,12 @@ the hash table has a fixed number of buckets (e.g. 10000). When the number of ke
 keep track of the load factor (that is #nodes / #buckets). When it exceeds a threshold (usually 0.75), the db must allocate a new array of buckets (twice as bigger as before in terms of number of buckets), rehash every single existing key and place it into the new array. 
 The cost of this rehashing operation can be considered as an amortized cost, meaning that the time complexity will be constant, independently of how many keys we're dealing with.
 
+#### Length-prefixed parser protocol
+* problem:
+at the moment it's implemented a delimiter-based parser: when a message enters in the system, the buffer is scanned looking for a delimiter, performing N iterations.
+* solution:
+to substitute the delimiter-based parsing with a length-prefixed parser, thus knowing exactly how long the command to parse is. 
+In this way messages can also contain special characters because the bytes are counted and not interpreted.
 #### TTL (Time To Live), e.g. SETEX key time value
 * problem: 
 sometimes, e.g. to preserve the space in RAM, we need that old data are evicted.
