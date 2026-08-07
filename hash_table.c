@@ -8,7 +8,9 @@
 
 typedef struct kv_node {
 	char *key;
-	char *value;
+	size_t key_len;
+	char *val;
+	size_t val_len;
 	struct kv_node *next;
 } kv_node_t;
 
@@ -41,7 +43,7 @@ static bool ht_resize(hash_table_t *ht) {
 		head = ht->buckets[i];
 		while (head != NULL) {
 			next_node = head->next;
-			index = hash_function(head->key, new_num_buckets);
+			index = hash_function(head->key, head->key_len, new_num_buckets);
 			head->next = new_buckets[index];
 			new_buckets[index] = head;
 			head = next_node;
@@ -74,7 +76,7 @@ hash_table_t *ht_create(size_t num_buckets) {
 
 void free_node(kv_node_t *node) {
 	free(node->key); // because of strdup()
-	free(node->value);
+	free(node->val);
 	free(node);
 }
 
@@ -97,14 +99,16 @@ void ht_destroy(hash_table_t *ht) {
 	free(ht);
 }
 
-char *ht_get(hash_table_t *ht, const char *key) {
-	size_t idx = hash_function(key, ht->num_buckets);
+char *ht_get(hash_table_t *ht, const char *key, size_t key_len,
+			 size_t *out_val_len) {
+	size_t idx = hash_function(key, key_len, ht->num_buckets);
 	char *val = NULL;
 	kv_node_t *head = ht->buckets[idx];
 
 	while (head) {
-		if (strcmp(head->key, key) == 0) {
-			val = head->value;
+		if (head->key_len == key_len && memcmp(head->key, key, key_len) == 0) {
+			val = head->val;
+			*out_val_len = head->val_len;
 			break;
 		} else {
 			head = head->next;
@@ -114,14 +118,15 @@ char *ht_get(hash_table_t *ht, const char *key) {
 	return val;
 }
 
-bool ht_del(hash_table_t *ht, const char *key) {
-	size_t idx = hash_function(key, ht->num_buckets);
+bool ht_del(hash_table_t *ht, const char *key, size_t key_len) {
+	size_t idx = hash_function(key, key_len, ht->num_buckets);
 	kv_node_t *head = ht->buckets[idx];
 
 	if (head == NULL)
 		return false; // bucket empty. Not found.
 
-	if (strcmp(head->key, key) == 0) { // found at the top of the bucket.
+	if (head->key_len == key_len && memcmp(head->key, key, key_len) ==
+										0) { // found at the top of the bucket.
 		kv_node_t *node_to_free = head;
 		ht->buckets[idx] = head->next;
 		free_node(node_to_free);
@@ -133,7 +138,8 @@ bool ht_del(hash_table_t *ht, const char *key) {
 
 	// it may be somewhere in the bucket.
 	while (head->next && !found) {
-		if (strcmp(head->next->key, key) == 0) {
+		if (head->next->key_len == key_len &&
+			memcmp(head->next->key, key, key_len) == 0) {
 			found = true;
 			kv_node_t *node_to_free = head->next;
 			head->next = head->next->next;
@@ -147,31 +153,38 @@ bool ht_del(hash_table_t *ht, const char *key) {
 	return found;
 }
 
-kv_node_t *create_kv_node(char *key, char *val) {
+kv_node_t *create_kv_node(char *key, char *val, size_t key_len,
+						  size_t val_len) {
 	kv_node_t *new_node = malloc(sizeof(*new_node));
 	if (new_node == NULL) {
 		return NULL;
 	}
 
 	new_node->key = key;
-	new_node->value = val;
+	new_node->key_len = key_len;
+	new_node->val = val;
+	new_node->val_len = val_len;
 	new_node->next = NULL;
 
 	return new_node;
 }
 
-/* TODO: The check of the strdup allocation is not yet implemented. */
-bool ht_set(hash_table_t *ht, const char *key, const char *val) {
-	size_t idx = hash_function(key, ht->num_buckets);
+bool ht_set(hash_table_t *ht, const char *key, const char *val,
+			size_t target_key_size, size_t val_size) {
+	size_t idx = hash_function(key, target_key_size, ht->num_buckets);
 	kv_node_t *head = ht->buckets[idx];
 	bool found = false;
+	char *new_val;
 
 	while (head && !found) {
-		if (strcmp(head->key, key) == 0) {
+		if (head->key_len == target_key_size &&
+			memcmp(head->key, key, target_key_size) == 0) {
 			found = true;
-			char *old_val = head->value;
-			head->value = strdup(val);
-			free(old_val);
+			new_val = malloc(val_size);
+			memcpy(new_val, val, val_size);
+			free(head->val);
+			head->val = new_val;
+			head->val_len = val_size;
 		} else {
 			head = head->next;
 		}
@@ -183,12 +196,21 @@ bool ht_set(hash_table_t *ht, const char *key, const char *val) {
 		// resize if needed
 		if ((float)ht->num_entries / ht->num_buckets >= LOAD_FACTOR) {
 			if (ht_resize(ht))
-				idx = hash_function(key, ht->num_buckets);
+				idx = hash_function(key, target_key_size, ht->num_buckets);
 		}
 
-		kv_node_t *new_node = create_kv_node(strdup(key), strdup(val));
-		if (new_node == NULL)
-			return false; // error
+		char *new_key = malloc(target_key_size);
+		memcpy(new_key, key, target_key_size);
+		new_val = malloc(val_size);
+		memcpy(new_val, val, val_size);
+
+		kv_node_t *new_node =
+			create_kv_node(new_key, new_val, target_key_size, val_size);
+		if (new_node == NULL) {
+			free(new_key);
+			free(new_val);
+			return false;
+		}
 		new_node->next = ht->buckets[idx];
 		ht->buckets[idx] = new_node;
 		ht->num_entries++;
@@ -197,12 +219,12 @@ bool ht_set(hash_table_t *ht, const char *key, const char *val) {
 }
 
 /* It implements, for now, the djb2 by Dan Bernstein. */
-size_t hash_function(const char *str, size_t num_bucket) {
+size_t hash_function(const char *key, size_t key_size, size_t num_bucket) {
 	unsigned long hash = 5381;
-	int c;
 
-	while ((c = *str++)) {
-		hash = ((hash << 5) + hash) + c; // equivalent to: hash * 33 + c
+	for (size_t i = 0; i < key_size; i++) {
+		hash =
+			((hash << 5) + hash) + key[i]; // equivalent to: hash * 33 + key[i]
 	}
 
 	return hash % num_bucket;

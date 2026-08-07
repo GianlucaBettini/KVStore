@@ -1,3 +1,4 @@
+#include "client.h"
 #include "hash_table.h"
 #include "network.h"
 #include "parser.h"
@@ -6,6 +7,7 @@
 #include <fcntl.h>
 #include <netdb.h>
 #include <signal.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,16 +26,13 @@
 	10024 // the real max number of clients is MAX_CLIENTS - 5 because fd 0,1,2
 		  // are stdin,stdout,stderr, fd 3,4 are listensock, epollfd
 #define MAX_VAL_LEN 1023
+#define STATUS_LEN 1
+#define STATUS_SUCCESS 0
+#define STATUS_ERROR 1
+#define STATUS_NOT_FOUND 2
+#define STATUS_BAD_REQUEST 3
 
 volatile sig_atomic_t server_running = 1;
-
-typedef struct {
-	int fd;
-	bool is_active;
-	char *read_buf, *write_buf;
-	size_t read_len, write_len;
-	size_t read_size, write_size;
-} client_state_t;
 
 client_state_t clients[MAX_CLIENTS];
 
@@ -56,6 +55,9 @@ void init_all_clients() {
 		clients[i].write_len = 0;
 		clients[i].read_size = 0;
 		clients[i].write_size = 0;
+		clients[i].payload_size = 0;
+		clients[i].buf_state =
+			READING_HEADER; // TODO: not sure about this initialization
 	}
 }
 
@@ -71,6 +73,8 @@ void init_client(int fd) {
 	}
 	clients[fd].read_len = 0;
 	clients[fd].write_len = 0;
+	clients[fd].payload_size = 0;
+	clients[fd].buf_state = READING_HEADER;
 }
 
 void free_all_clients() {
@@ -101,13 +105,32 @@ bool disconnect_client(int fd, int *closed) {
 	return false;
 }
 
+char *get_payload_if_ready(char *read_buf, size_t buf_len,
+						   uint32_t *payload_size, buf_state_t *state) {
+	if (*state == READING_HEADER) {
+		if (buf_len < HEADER_LEN)
+			return NULL;
+
+		*payload_size = ntohl(*(uint32_t *)read_buf);
+		*state = READING_PAYLOAD;
+	}
+
+	if (*state == READING_PAYLOAD) {
+		if (buf_len < HEADER_LEN + *payload_size)
+			return NULL;
+
+		return read_buf + HEADER_LEN;
+	}
+
+	return NULL;
+}
+
 /* Append @str to the write buf of the client fd.
  * If there is not enough space, realloc the buffer doubling its size.
  * If the maximum buffer size is reached and surpassed, the client is
  * disconnected.
  * Return true on success, false on disconnection. */
-bool buf_append(int fd, const char *str, int *closed) {
-	int len = strlen(str) + 1; // counting the \0 byte appended by strcpy()
+bool buf_append(int fd, const void *data, size_t len, int *closed) {
 	while (clients[fd].write_len + len > clients[fd].write_size) {
 		if (clients[fd].write_size >= MAX_BUF_SIZE) {
 			return disconnect_client(fd, closed);
@@ -117,9 +140,35 @@ bool buf_append(int fd, const char *str, int *closed) {
 		clients[fd].write_size *= 2;
 	}
 
-	strcpy(clients[fd].write_buf + clients[fd].write_len, str);
-	clients[fd].write_len +=
-		(len - 1); // not counting the \0 byte appended by strcpy()
+	memcpy(clients[fd].write_buf + clients[fd].write_len, data, len);
+	clients[fd].write_len += len;
+
+	return true;
+}
+
+/* Packet = HEADER + PAYLOAD
+ * PAYLOAD = [1 byte: status] + [n bytes: data] with n >= 0
+ * status: 0 -> success; 1 -> generic error; 2 -> not found */
+bool create_outgoing_packet_and_append(int fd, uint32_t payload_size,
+									   const void *data, uint8_t status,
+									   int *closed) {
+	// === HEADER
+	uint32_t header = htonl(payload_size);
+	if (!buf_append(fd, &header, HEADER_LEN, closed)) {
+		return false;
+	}
+
+	// === STATUS
+	if (!buf_append(fd, &status, STATUS_LEN, closed)) {
+		return false;
+	}
+
+	// === DATA
+	if (data != NULL) {
+		if (!buf_append(fd, data, payload_size - STATUS_LEN, closed)) {
+			return false;
+		}
+	}
 
 	return true;
 }
@@ -262,9 +311,10 @@ int main(void) {
 	struct sockaddr_storage client_addr;
 	int epollfd, nfds;
 	struct epoll_event ev, events[MAX_EVENTS];
-	char buf_to_parse[MAX_BUF_SIZE];
 	parsed_input_t parsed;
 	struct sigaction act = {0};
+	char *payload;
+	int valid;
 
 	sigemptyset(&act.sa_mask);
 
@@ -333,12 +383,25 @@ int main(void) {
 				if (!fill_client_read_buf(evfd, &closed))
 					continue;
 
-				while ((rv = get_command_to_scan(
-							clients[evfd].read_buf, &clients[evfd].read_len,
-							buf_to_parse, '\n')) == ANET_OK) {
-					int valid = 1;
-					if (!parse_input(buf_to_parse, &parsed)) {
-						buf_append(evfd, "Invalid syntax\n", &closed);
+				while (1) {
+					payload = get_payload_if_ready(
+						clients[evfd].read_buf, clients[evfd].read_len,
+						&clients[evfd].payload_size, &clients[evfd].buf_state);
+
+					if (payload == NULL) {
+						break;
+					}
+
+					valid = 1;
+					if (!parse_binary(payload, clients[evfd].payload_size,
+									  &parsed)) {
+						// TODO: I need a way to create a memory block
+						// containing the data and a way to count the bytes
+						// without using strlen()
+						create_outgoing_packet_and_append(
+							evfd, STATUS_LEN, NULL, STATUS_BAD_REQUEST,
+							&closed);
+
 						valid = 0;
 					}
 
@@ -351,6 +414,18 @@ int main(void) {
 								break;
 						}
 					}
+
+					memmove(clients[evfd].read_buf,
+							clients[evfd].read_buf + HEADER_LEN +
+								clients[evfd].payload_size,
+							clients[evfd].read_len - HEADER_LEN -
+								clients[evfd].payload_size);
+
+					clients[evfd].read_len -=
+						(HEADER_LEN + clients[evfd].payload_size);
+
+					clients[evfd].buf_state = READING_HEADER;
+					clients[evfd].payload_size = 0;
 				}
 
 				if (closed)
@@ -376,37 +451,43 @@ int main(void) {
 
 bool exec_cmd(parsed_input_t *parsed, hash_table_t *ht, int fd, int *closed) {
 	char *val = NULL;
+	size_t val_len;
 
 	switch (parsed->type) {
 	case CMD_SET:
-		if (ht_set(ht, parsed->key, parsed->val)) {
-			if (!buf_append(fd, "OK\n", closed))
+		if (ht_set(ht, parsed->key, parsed->val, parsed->key_size,
+				   parsed->val_size)) {
+			if (!create_outgoing_packet_and_append(fd, STATUS_LEN, NULL,
+												   STATUS_SUCCESS, closed))
 				return false;
 		} else {
-			if (!buf_append(fd, "Not OK\n", closed))
+			if (!create_outgoing_packet_and_append(fd, STATUS_LEN, NULL,
+												   STATUS_ERROR, closed))
 				return false;
 		}
 		break;
 
 	case CMD_GET:
-		val = ht_get(ht, parsed->key);
+		val = ht_get(ht, parsed->key, parsed->key_size, &val_len);
 		if (val == NULL) {
-			if (!buf_append(fd, "Not found\n", closed))
+			if (!create_outgoing_packet_and_append(fd, STATUS_LEN, NULL,
+												   STATUS_NOT_FOUND, closed))
 				return false;
 		} else {
-			char temp_buf[MAX_VAL_LEN + 2];
-			snprintf(temp_buf, sizeof(temp_buf), "%s\n", val);
-			if (!buf_append(fd, temp_buf, closed))
+			if (!create_outgoing_packet_and_append(fd, STATUS_LEN + val_len,
+												   val, STATUS_SUCCESS, closed))
 				return false;
 		}
 		break;
 
 	case CMD_DEL:
-		if (ht_del(ht, parsed->key)) {
-			if (!buf_append(fd, "Deleted\n", closed))
+		if (ht_del(ht, parsed->key, parsed->key_size)) {
+			if (!create_outgoing_packet_and_append(fd, STATUS_LEN, NULL,
+												   STATUS_SUCCESS, closed))
 				return false;
 		} else {
-			if (!buf_append(fd, "Not found\n", closed))
+			if (!create_outgoing_packet_and_append(fd, STATUS_LEN, NULL,
+												   STATUS_ERROR, closed))
 				return false;
 		}
 		break;

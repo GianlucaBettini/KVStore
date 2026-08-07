@@ -1,66 +1,66 @@
 #include "parser.h"
-#include <ctype.h>
+#include <netinet/in.h>
+#include <stdint.h>
 #include <string.h>
 
-/* Convert @str to lowercase. */
-void tolower_string(char *str) {
-  if (str == NULL)
-    return;
+bool parse_binary(char *payload, uint32_t payload_size,
+				  parsed_input_t *parsed) {
+	uint8_t cmd;
+	uint16_t key_size, val_size;
+	bool is_set_cmd;
+	size_t already_read = 0;
 
-  for (int i = 0; str[i] != 0; i++) {
-    str[i] = (char)tolower((unsigned char)str[i]);
-  }
-}
+	// TODO: check for payload size
+	if (already_read > payload_size)
+		return false;
 
-/* Assign the right command enum to the token. */
-cmd_type_t parse_cmd(char *token) {
-  // Convert to lowercase to make command parsing case-insensitive
-  tolower_string(token);
+	// === COMMAND
+	if (already_read + CMD_HEADER > payload_size)
+		return false;
+	cmd = (uint8_t)payload[0];
+	if (cmd == CMD_INVALID)
+		return false;
+	is_set_cmd = (cmd == CMD_SET);
 
-  if (strcmp(token, "get") == 0)
-    return CMD_GET;
-  else if (strcmp(token, "set") == 0)
-    return CMD_SET;
-  else if (strcmp(token, "del") == 0)
-    return CMD_DEL;
-  else
-    return CMD_INVALID;
-}
+	parsed->type = cmd;
+	already_read += CMD_HEADER;
 
-bool parse_input(char *str, parsed_input_t *parsed) {
-  cmd_type_t cmd_type;
-  char *state_ptr; // used in strtok_r to save the state in the string
+	// === KEY
+	if (already_read + KEY_HEADER > payload_size)
+		return false;
 
-  char *token = strtok_r(str, " \r\n", &state_ptr);
-  if (token == NULL)
-    return false;
-  cmd_type = parse_cmd(token);
-  if (cmd_type == CMD_INVALID)
-    return false;
-  parsed->type = cmd_type;
+	uint16_t net_key_size;
+	memcpy(&net_key_size, payload + already_read, sizeof(uint16_t));
+	key_size = ntohs(net_key_size);
+	already_read += KEY_HEADER;
+	// TODO: check for key_size
+	if (already_read + key_size > payload_size)
+		return false;
 
-  token = strtok_r(NULL, " \r\n", &state_ptr);
-  if (token == NULL)
-    return false;
-  parsed->key = token;
+	parsed->key = payload + already_read;
+	parsed->key_size = key_size;
+	already_read += key_size;
 
-  // TODO: Currently I ignore the extra arguments (tokens) (e.g. GET key extra1)
-  // In the future it must validate the exact number of args for each command.
-  switch (parsed->type) {
-  case CMD_SET:
-    token = strtok_r(NULL, " \r\n", &state_ptr);
-    if (token == NULL) {
-      return false;
-    }
-    parsed->val = token;
-    break;
+	// === VALUE
+	if (is_set_cmd) {
+		if (already_read + VAL_HEADER > payload_size)
+			return false;
 
-  case CMD_DEL:
-  case CMD_GET:
-    break;
-  default:
-    return false;
-  }
+		uint16_t net_val_size;
+		memcpy(&net_val_size, payload + already_read, sizeof(uint16_t));
+		val_size = ntohs(net_val_size);
+		already_read += VAL_HEADER;
+		// TODO: check for val_size
+		if (already_read + val_size > payload_size)
+			return false;
 
-  return true;
+		parsed->val = payload + already_read;
+		parsed->val_size = val_size;
+		already_read += val_size;
+	}
+
+	if (already_read > payload_size)
+		return false;
+
+	return true;
 }
