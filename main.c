@@ -315,6 +315,7 @@ int main(void) {
 	struct sigaction act = {0};
 	char *payload;
 	int valid;
+	size_t processed;
 
 	sigemptyset(&act.sa_mask);
 
@@ -383,14 +384,18 @@ int main(void) {
 				if (!fill_client_read_buf(evfd, &closed))
 					continue;
 
+				processed = 0;
 				while (1) {
 					payload = get_payload_if_ready(
-						clients[evfd].read_buf, clients[evfd].read_len,
+						clients[evfd].read_buf + processed,
+						clients[evfd].read_len - processed,
 						&clients[evfd].payload_size, &clients[evfd].buf_state);
 
 					if (payload == NULL) {
 						break;
 					}
+
+					processed += HEADER_LEN + clients[evfd].payload_size;
 
 					valid = 1;
 					if (!parse_binary(payload, clients[evfd].payload_size,
@@ -415,17 +420,16 @@ int main(void) {
 						}
 					}
 
-					memmove(clients[evfd].read_buf,
-							clients[evfd].read_buf + HEADER_LEN +
-								clients[evfd].payload_size,
-							clients[evfd].read_len - HEADER_LEN -
-								clients[evfd].payload_size);
-
-					clients[evfd].read_len -=
-						(HEADER_LEN + clients[evfd].payload_size);
-
 					clients[evfd].buf_state = READING_HEADER;
 					clients[evfd].payload_size = 0;
+				}
+
+				if (processed > 0) {
+					memmove(clients[evfd].read_buf,
+							clients[evfd].read_buf + processed,
+							clients[evfd].read_len - processed);
+
+					clients[evfd].read_len -= processed;
 				}
 
 				if (closed)
