@@ -19,7 +19,7 @@
 #define INIT_READ_BUF_SIZE 8192 // 2^13
 #define INIT_WRITE_BUF_SIZE 8192
 #define PORT "8080"
-#define BACKLOG 10
+#define BACKLOG 4096
 #define NUM_BUCKETS 10000
 #define MAX_EVENTS 128
 #define MAX_CLIENTS                                                            \
@@ -493,6 +493,8 @@ bool exec_cmd(parsed_input_t *parsed, hash_table_t *ht, int fd, int *closed) {
 		break;
 
 	default:
+		create_outgoing_packet_and_append(fd, STATUS_LEN, NULL,
+										  STATUS_BAD_REQUEST, closed);
 		return false;
 	}
 
