@@ -1,3 +1,6 @@
+#ifndef HASH_TABLE_H
+#define HASH_TABLE_H
+
 #include <stdbool.h>
 #include <stddef.h> // for size_t
 
@@ -40,3 +43,5 @@ char *ht_get(hash_table_t *ht, const char *key, size_t key_len,
 
 /* Hash function to turn a key into an integer. */
 size_t hash_function(const char *key, size_t key_size, size_t num_bucket);
+
+#endif

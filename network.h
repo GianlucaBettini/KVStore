@@ -1,3 +1,6 @@
+#ifndef NETWORK_H
+#define NETWORK_H
+
 #include <netdb.h>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -42,9 +45,6 @@ ssize_t net_recv(int clientfd, char *server_buf, size_t len);
  * Return @ANET_OK on success, @ANET_ERR on error. */
 ssize_t net_send(int clientfd, char *buf, size_t len); // char *sender_buf ???
 
-/* Store into @buf_to_parse the bytes in @server_buf until @target is found and
- * shift @server_buf of the read bytes times. Return @ANET_OK.
- * If not found in the first *@curr_buf_len bytes, returns @ANET_ERR. */
-// TODO Consider to change int *curr_buf_len into size_t *curr_buf_len.
-int get_command_to_scan(char *server_buf, size_t *curr_buf_len,
-						char *buf_to_parse, char target);
+int create_and_bind_listen_socket(char *host, char *port, int *listen_sock);
+
+#endif

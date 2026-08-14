@@ -1,6 +1,8 @@
 #include "network.h"
+#include "config.h"
 #include <fcntl.h>
 #include <netdb.h>
+#include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -95,22 +97,19 @@ ssize_t net_send(int clientfd, char *buf, size_t len) {
 	return nbytes;
 }
 
-/* TODO: move it elsewhere */
-int get_command_to_scan(char *server_buf, size_t *curr_buf_len,
-						char *buf_to_parse, char target) {
-	size_t command_len;
+int create_and_bind_listen_socket(char *host, char *port, int *listen_sock) {
+	int rv;
 
-	char *newline_ptr = memchr(server_buf, target, *curr_buf_len);
-	if (newline_ptr == NULL)
+	if ((rv = net_info(host, port, listen_sock)) == ANET_ERR) {
 		return ANET_ERR;
+	}
 
-	command_len = newline_ptr - server_buf + 1; // +1 because I count also '\n'
+	if ((rv = net_listen(*listen_sock, BACKLOG)) == ANET_ERR) {
+		close(*listen_sock);
+		return ANET_ERR;
+	}
 
-	memcpy(buf_to_parse, server_buf, command_len - 1);
-	buf_to_parse[command_len - 1] = 0;
-
-	memmove(server_buf, server_buf + command_len, *curr_buf_len - command_len);
-	*curr_buf_len -= command_len;
+	printf("Server listening on port %s\n", port);
 
 	return ANET_OK;
 }

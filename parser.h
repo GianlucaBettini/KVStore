@@ -1,18 +1,14 @@
-#include "hash_table.h"
-#include <stdbool.h>
-#include <stdint.h>
+#ifndef PARSER_H
+#define PARSER_H
 
-// Maybe they are better in a new section dedicated to the protocol
-#define HEADER_LEN 4
-#define CMD_HEADER 1
-#define KEY_HEADER 2
-#define VAL_HEADER 2
+#include "protocol.h"
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 /* ============ Structs and enum ============ */
 // n.b Structs are defined here in the .h because the main.c need to see and
 // modify them.
-
-typedef enum command_type { CMD_SET, CMD_GET, CMD_DEL, CMD_INVALID } cmd_type_t;
 
 typedef struct parsed_input {
 	cmd_type_t type;
@@ -24,10 +20,6 @@ typedef struct parsed_input {
 
 /* ============ Functions ============ */
 
-/* Parses a raw command string, populating the parsed_input_t struct.
- * WARNING: This function uses zero-copy parsing, so it mutates the input @str
- * by replacing delimiters with '\0'. The caller must ensure @str is mutable and
- * must not free @parsed->key and @parsed->val. Return true on success. */
-bool parse_input(char *str, parsed_input_t *parsed);
-
 bool parse_binary(char *payload, uint32_t size, parsed_input_t *parsed);
+
+#endif
