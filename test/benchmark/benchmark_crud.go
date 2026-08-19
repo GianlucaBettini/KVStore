@@ -43,18 +43,24 @@ var (
 )
 
 func main() {
-	fmt.Printf("Load Generator in Go (PIPELINING-CRUD-MODE)...\n")
+	fmt.Printf("Load Generator in (PIPELINING-CRUD-MODE)...\n")
 	fmt.Printf("%d clients | %d ops per client\n", NumClients, CmdsPerClient*4)
 	fmt.Printf("total operations: %d\n", NumClients*CmdsPerClient*4)
 
 	var wg sync.WaitGroup
-	wg.Add(NumClients)
+	var startBarrier sync.WaitGroup
 
-	startTime := time.Now()
+	wg.Add(NumClients)
+	startBarrier.Add(NumClients + 1) // +1 for the main thread
 
 	for i := 0; i < NumClients; i++ {
-		go clientWorker(i, &wg)
+		go clientWorker(i, &wg, &startBarrier)
 	}
+
+	startBarrier.Done()
+	startBarrier.Wait()
+
+	startTime := time.Now()
 
 	wg.Wait()
 	duration := time.Since(startTime).Seconds()
@@ -71,15 +77,19 @@ func main() {
 	fmt.Println("------------------------------")
 }
 
-func clientWorker(clientID int, wg *sync.WaitGroup) {
+func clientWorker(clientID int, wg *sync.WaitGroup, startBarrier *sync.WaitGroup) {
 	defer wg.Done() // Segnala al WaitGroup che abbiamo finito alla fine della funzione
 
 	conn, err := net.Dial("tcp", "127.0.0.1:8080")
 	if err != nil {
+		startBarrier.Done()
 		atomic.AddUint64(&totalFail, uint64(CmdsPerClient*2))
 		return
 	}
 	defer conn.Close()
+
+	startBarrier.Done()
+	startBarrier.Wait()
 
 	var pipelineReq []byte
 	expectedResponses := CmdsPerClient * 4 

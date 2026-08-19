@@ -193,6 +193,39 @@ def main():
     
     s_ping.close()
 
+
+    # === TCP Fragmentation ===
+    # Send a packet split in more than one send call, to test the packet TCP fragmentation management
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.connect((HOST, PORT))
+
+    valid_cmd = CMD_GET
+    valid_key = b"not_inserted_key"
+    valid_key_len = len(valid_key)
+    payload_size = CMD_SIZE + KEY_SIZE + valid_key_len
+    fmt = f">IBH{valid_key_len}s"
+    packet_valid = struct.pack(fmt, payload_size, valid_cmd, valid_key_len, valid_key)
+    
+    packet = struct.pack(fmt, payload_size, valid_cmd, valid_key_len, valid_key)
+    
+    s.sendall(packet[:2]) # Send just the first 2 bytes of the header
+    time.sleep(0.1)
+    s.sendall(packet[2:6]) # Send the rest of the header + part of the payload
+    time.sleep(0.1)
+    s.sendall(packet[6:]) # Send the remaining bytes
+
+    header_bytes = s.recv(HEADER_SIZE)
+    assert len(header_bytes) == HEADER_SIZE, "Fragmentation NOT properly handled"
+    reply_payload_size = struct.unpack(">I", header_bytes)[0]
+    reply_payload_bytes = s.recv(reply_payload_size)
+    status = struct.unpack(">B", reply_payload_bytes[:1])[0]
+    
+    assert status == STATUS_NOT_FOUND, f"expected status: {STATUS_NOT_FOUND}, received: {status}"
+    print("------------------------------")
+    print("TCP fragmentation test passed")
+    print("------------------------------\n\n")
+    s.close()
+
     print("[ALL TESTS PASSED]")
 
     return

@@ -181,6 +181,8 @@ bool ht_set(hash_table_t *ht, const char *key, const char *val,
 			memcmp(head->key, key, target_key_size) == 0) {
 			found = true;
 			new_val = malloc(val_size);
+			if (new_val == NULL)
+				return false;
 			memcpy(new_val, val, val_size);
 			free(head->val);
 			head->val = new_val;
@@ -200,8 +202,12 @@ bool ht_set(hash_table_t *ht, const char *key, const char *val,
 		}
 
 		char *new_key = malloc(target_key_size);
+		if (new_key == NULL)
+			return false;
 		memcpy(new_key, key, target_key_size);
 		new_val = malloc(val_size);
+		if (new_val == NULL)
+			return false;
 		memcpy(new_val, val, val_size);
 
 		kv_node_t *new_node =

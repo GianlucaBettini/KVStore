@@ -93,7 +93,8 @@ ssize_t net_recv(int clientfd, char *buf, size_t len) {
 }
 
 ssize_t net_send(int clientfd, char *buf, size_t len) {
-	int nbytes = send(clientfd, buf, len, 0);
+	int nbytes =
+		send(clientfd, buf, len, MSG_NOSIGNAL); // MSG_NOSIGNAL good practise
 	return nbytes;
 }
 

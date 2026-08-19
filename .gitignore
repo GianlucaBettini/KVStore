@@ -31,3 +31,5 @@ core.*
 vgcore.*
 # Ignores any general log files the program or debuggers might output
 *.log
+
+docs/diary.md 

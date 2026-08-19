@@ -164,6 +164,9 @@ int main(void) {
 					clients[evfd].payload_size = 0;
 				}
 
+				if (closed)
+					continue;
+
 				if (processed > 0) {
 					memmove(clients[evfd].read_buf,
 							clients[evfd].read_buf + processed,
@@ -171,9 +174,6 @@ int main(void) {
 
 					clients[evfd].read_len -= processed;
 				}
-
-				if (closed)
-					continue;
 
 				if (!drain_client_write_buf(evfd, epollfd, &closed, false))
 					continue;
@@ -188,6 +188,7 @@ int main(void) {
 
 	free_all_clients();
 	close(listen_sock);
+	close(epollfd);
 	ht_destroy(ht);
 
 	return 0;
